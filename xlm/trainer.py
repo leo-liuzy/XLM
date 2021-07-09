@@ -15,7 +15,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils import clip_grad_norm_
-import apex
+# import apex
 
 from .optim import get_optimizer
 from .utils import to_cuda, concat_batches, find_modules
@@ -67,6 +67,7 @@ class Trainer(object):
 
         # float16 / distributed (AMP)
         if params.amp >= 0:
+
             self.init_amp()
             if params.multi_gpu:
                 logger.info("Using apex.parallel.DistributedDataParallel ...")
@@ -92,8 +93,11 @@ class Trainer(object):
         params.pred_probs = torch.FloatTensor([params.word_mask, params.word_keep, params.word_rand])
 
         # probabilty to predict a word
-        counts = np.array(list(self.data['dico'].counts.values()))
-        params.mask_scores = np.maximum(counts, 1) ** -params.sample_alpha
+        counts = np.array([self.data['dico'].counts[i] for i in range(len(self.data['dico'].counts))])
+        if params.use_hg:
+            params.mask_scores = counts ** -params.sample_alpha
+        else:
+            params.mask_scores = np.maximum(counts, 1) ** -params.sample_alpha
         params.mask_scores[params.pad_index] = 0  # do not predict <PAD> index
         params.mask_scores[counts == 0] = 0       # do not predict special tokens
 
@@ -118,6 +122,7 @@ class Trainer(object):
             [('MLM-%s' % l, []) for l in params.langs] +
             [('MLM-%s-%s' % (l1, l2), []) for l1, l2 in data['para'].keys()] +
             [('MLM-%s-%s' % (l2, l1), []) for l1, l2 in data['para'].keys()] +
+            [('SimCSE-%s' % l, []) for l in params.langs] +
             [('PC-%s-%s' % (l1, l2), []) for l1, l2 in params.pc_steps] +
             [('AE-%s' % lang, []) for lang in params.ae_steps] +
             [('MT-%s-%s' % (l1, l2), []) for l1, l2 in params.mt_steps] +
@@ -435,7 +440,7 @@ class Trainer(object):
             x_prob = params.mask_scores[x.flatten()]
             n_tgt = math.ceil(params.word_pred * slen * bs)
             tgt_ids = np.random.choice(len(x_prob), n_tgt, replace=False, p=x_prob / x_prob.sum())
-            pred_mask = torch.zeros(slen * bs, dtype=torch.uint8)
+            pred_mask = torch.zeros(slen * bs, dtype=torch.bool)
             pred_mask[tgt_ids] = 1
             pred_mask = pred_mask.view(slen, bs)
 
@@ -694,7 +699,7 @@ class Trainer(object):
         self.stats['processed_s'] += lengths.size(0)
         self.stats['processed_w'] += pred_mask.sum().item()
 
-    def mlm_step(self, lang1, lang2, lambda_coeff):
+    def mlm_step(self, lang1, lang2, lambda_coeff, params):
         """
         Masked word prediction step.
         MLM objective is lang2 is None, TLM objective otherwise.
@@ -712,11 +717,61 @@ class Trainer(object):
         x, lengths, positions, langs, _ = self.round_batch(x, lengths, positions, langs)
         x, y, pred_mask = self.mask_out(x, lengths)
 
+        # Leo's comment: the loader doesn't have BOS at the start for some reason, so we are
+        #                manually inserting it.
+        assert tuple(x.shape) == (params.bptt, params.batch_size)
+        # Note: one might need to adjust N_MAX_POSITIONS in model/transformer.py
+        
+        y += 1
         # cuda
-        x, y, pred_mask, lengths, positions, langs = to_cuda(x, y, pred_mask, lengths, positions, langs)
+        if not params.use_cpu:
+            x, y, pred_mask, lengths, positions, langs = to_cuda(x, y, pred_mask, lengths, positions, langs)
+
+        # forward / loss
+        # assert len(x.size()) == 2
+        tensor = model('fwd', x=x, lengths=lengths, positions=positions, langs=langs, causal=False)
+        if not params.simcse_after_mlm:
+            # SimCSE needs a second forward pass
+            tensor_from_diff_mask = model('fwd', x=x, lengths=lengths, positions=positions, langs=langs, causal=False)
+
+        _, loss = model('predict', tensor=tensor, pred_mask=pred_mask, y=y, get_scores=False)
+        self.stats[('MLM-%s' % lang1) if lang2 is None else ('MLM-%s-%s' % (lang1, lang2))].append(loss.item())
+        loss = lambda_coeff * loss
+
+        # optimize
+        self.optimize(loss)
+
+        # number of processed sentences / words
+        self.n_sentences += params.batch_size
+        self.stats['processed_s'] += lengths.size(0)
+        self.stats['processed_w'] += pred_mask.sum().item()
+
+    def simcse_step(self, lang1, lang2, lambda_coeff):
+        """
+        SimCSE step.
+        This is a mono-lingual loss
+        """
+        assert lang1 is not None and lang2 is None
+        assert lambda_coeff >= 0
+        if lambda_coeff == 0:
+            return
+        params = self.params
+        name = 'model' if params.encoder_only else 'encoder'
+        model = getattr(self, name)
+        model.train()
+
+        # generate batch / select words to predict
+        x, lengths, positions, langs, _ = self.generate_batch(lang1, lang2, 'pred')
+        x, lengths, positions, langs, _ = self.round_batch(x, lengths, positions, langs)
+        x, y, pred_mask = self.mask_out(x, lengths)
+
+        # cuda
+        if not params.use_cpu:
+            x, y, pred_mask, lengths, positions, langs = to_cuda(x, y, pred_mask, lengths, positions, langs)
 
         # forward / loss
         tensor = model('fwd', x=x, lengths=lengths, positions=positions, langs=langs, causal=False)
+
         _, loss = model('predict', tensor=tensor, pred_mask=pred_mask, y=y, get_scores=False)
         self.stats[('MLM-%s' % lang1) if lang2 is None else ('MLM-%s-%s' % (lang1, lang2))].append(loss.item())
         loss = lambda_coeff * loss

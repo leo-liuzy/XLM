@@ -279,6 +279,7 @@ def shuf_order(langs, params=None, n=5):
     s_para = [para[i] for i in np.random.choice(len(para), size=min(n, len(para)), p=p_para, replace=True)] if len(para) > 0 else []
 
     assert len(s_mono) + len(s_para) > 0
+    # always do Monolingual objective first and then Bilingual objective
     return [(lang, None) for lang in s_mono] + s_para
 
 

@@ -9,9 +9,11 @@ from logging import getLogger
 import os
 import numpy as np
 import torch
+import math
 
 from .dataset import StreamDataset, Dataset, ParallelDataset
-from .dictionary import BOS_WORD, EOS_WORD, PAD_WORD, UNK_WORD, MASK_WORD
+from .dictionary import BOS_WORD, EOS_WORD, PAD_WORD, UNK_WORD, MASK_WORD, Dictionary
+from transformers import AutoTokenizer
 
 
 logger = getLogger()
@@ -21,7 +23,9 @@ def process_binarized(data, params):
     """
     Process a binarized dataset and log main statistics.
     """
-    dico = data['dico']
+    dico = data['dico'] if not params.use_hg else data["tokenizer"]
+    if isinstance(dico, str):
+        dico = AutoTokenizer.from_pretrained(dico)
     assert ((data['sentences'].dtype == np.uint16) and (len(dico) < 1 << 16) or
             (data['sentences'].dtype == np.int32) and (1 << 16 <= len(dico) < 1 << 31))
     logger.info("%i words (%i unique) in %i sentences. %i unknown words (%i unique) covering %.2f%% of the data." % (
@@ -30,7 +34,7 @@ def process_binarized(data, params):
         sum(data['unk_words'].values()), len(data['unk_words']),
         100. * sum(data['unk_words'].values()) / (len(data['sentences']) - len(data['positions']))
     ))
-    if params.max_vocab != -1:
+    if params.max_vocab != -1 and not params.use_hg_model:
         assert params.max_vocab > 0
         logger.info("Selecting %i most frequent words ..." % params.max_vocab)
         dico.max_vocab(params.max_vocab)
@@ -38,7 +42,7 @@ def process_binarized(data, params):
         unk_count = (data['sentences'] == dico.index(UNK_WORD)).sum()
         logger.info("Now %i unknown words covering %.2f%% of the data."
                     % (unk_count, 100. * unk_count / (len(data['sentences']) - len(data['positions']))))
-    if params.min_count > 0:
+    if params.min_count > 0 and not params.use_hg_model:
         logger.info("Selecting words with >= %i occurrences ..." % params.min_count)
         dico.min_count(params.min_count)
         data['sentences'][data['sentences'] >= len(dico)] = dico.index(UNK_WORD)
@@ -70,21 +74,46 @@ def load_binarized(path, params):
     return data
 
 
-def set_dico_parameters(params, data, dico):
+def set_dico_parameters(params, data, dico=None):
     """
     Update dictionary parameters.
     """
-    if 'dico' in data:
-        assert data['dico'] == dico
+    if not params.use_hg:
+        if 'dico' in data:
+            assert data['dico'] == dico
+        else:
+            data['dico'] = dico
     else:
-        data['dico'] = dico
+        if 'dico' in data:
+            assert data['dico'].name_or_path == dico
+            dico = data['dico']
+            assert hasattr(dico, "counts")
+        else:
+            # this is a dirty fix to make the tokenizer has "counts" property
+            # since we don't have access to actual count/frequency, we use sentencepiece model's
+            # unigram probability to approx the frequency since both has the same order
+            # os.path.exists(dico)
+            tokenizer_name = dico
+            dico = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=False)
+
+            assert not hasattr(dico, "counts")
+            assert hasattr(dico, "sp_model")
+            assert hasattr(dico, "fairseq_offset")
+
+            counts = {i + dico.fairseq_offset: math.exp(dico.sp_model.get_score(i)) for i in range(len(dico.sp_model))}
+            for i in dico.all_special_ids:
+                counts[i] = 0
+            assert len(counts) == len(dico)
+            dico = AutoTokenizer.from_pretrained(tokenizer_name)
+            dico.counts = counts
+            data['dico'] = dico
 
     n_words = len(dico)
-    bos_index = dico.index(BOS_WORD)
-    eos_index = dico.index(EOS_WORD)
-    pad_index = dico.index(PAD_WORD)
-    unk_index = dico.index(UNK_WORD)
-    mask_index = dico.index(MASK_WORD)
+    bos_index = dico.index(BOS_WORD) if not params.use_hg else dico.bos_token_id
+    eos_index = dico.index(EOS_WORD) if not params.use_hg else dico.eos_token_id
+    pad_index = dico.index(PAD_WORD) if not params.use_hg else dico.pad_token_id
+    unk_index = dico.index(UNK_WORD) if not params.use_hg else dico.unk_token_id
+    mask_index = dico.index(MASK_WORD) if not params.use_hg else dico.mask_token_id
     if hasattr(params, 'bos_index'):
         assert params.n_words == n_words
         assert params.bos_index == bos_index
@@ -124,7 +153,7 @@ def load_mono_data(params, data):
 
             # load data / update dictionary parameters / update data
             mono_data = load_binarized(params.mono_dataset[lang][splt], params)
-            set_dico_parameters(params, data, mono_data['dico'])
+            set_dico_parameters(params, data, mono_data['dico'] if not params.use_hg else mono_data['tokenizer'])
 
             # create stream dataset
             bs = params.batch_size if splt == 'train' else 1
@@ -193,8 +222,8 @@ def load_para_data(params, data):
             tgt_data = load_binarized(tgt_path, params)
 
             # update dictionary parameters
-            set_dico_parameters(params, data, src_data['dico'])
-            set_dico_parameters(params, data, tgt_data['dico'])
+            set_dico_parameters(params, data, src_data['dico'] if not params.use_hg else src_data['tokenizer'])
+            set_dico_parameters(params, data, tgt_data['dico'] if not params.use_hg else tgt_data['tokenizer'])
 
             # create ParallelDataset
             dataset = ParallelDataset(
@@ -233,7 +262,9 @@ def check_data_params(params):
     assert os.path.isdir(params.data_path), params.data_path
 
     # check languages
-    params.langs = params.lgs.split('-') if params.lgs != 'debug' else ['en']
+    ######## start of Leo's modification
+    params.langs = params.lgs.split(',') if params.lgs != 'debug' else ['en']
+    ######## end of Leo's modification
     assert len(params.langs) == len(set(params.langs)) >= 1
     # assert sorted(params.langs) == params.langs
     params.id2lang = {k: v for k, v in enumerate(sorted(params.langs))}
@@ -247,10 +278,16 @@ def check_data_params(params):
     assert len(params.clm_steps) == len(set(params.clm_steps))
 
     # MLM / TLM steps
-    mlm_steps = [s.split('-') for s in params.mlm_steps.split(',') if len(s) > 0]
+    mlm_steps = [s.split('-') if s not in ["zh-Hans, zh-Hant"] else [s] for s in params.mlm_steps.split(',') if len(s) > 0]
     params.mlm_steps = [(s[0], None) if len(s) == 1 else tuple(s) for s in mlm_steps]
     assert all([(l1 in params.langs) and (l2 in params.langs or l2 is None) for l1, l2 in params.mlm_steps])
     assert len(params.mlm_steps) == len(set(params.mlm_steps))
+
+    # MLM / TLM steps
+    simcse_steps = [s.split('-') if s not in ["zh-Hans, zh-Hant"] else [s] for s in params.simcse_steps.split(',') if len(s) > 0]
+    params.simcse_steps = [(s[0], None) if len(s) == 1 else tuple(s) for s in simcse_steps]
+    assert all([(l1 in params.langs) and (l2 is None) for l1, l2 in params.simcse_steps])
+    assert len(params.simcse_steps) == len(set(params.simcse_steps))
 
     # parallel classification steps
     params.pc_steps = [tuple(s.split('-')) for s in params.pc_steps.split(',') if len(s) > 0]
@@ -286,7 +323,7 @@ def check_data_params(params):
     required_mono = set([l1 for l1, l2 in (params.mlm_steps + params.clm_steps) if l2 is None] + params.ae_steps + params.bt_src_langs)
     params.mono_dataset = {
         lang: {
-            splt: os.path.join(params.data_path, '%s.%s.pth' % (splt, lang))
+            splt: os.path.join(params.data_path, '%s.%s.pth' % (lang, splt))
             for splt in ['train', 'valid', 'test']
         } for lang in params.langs if lang in required_mono
     }
@@ -301,8 +338,8 @@ def check_data_params(params):
     required_para = required_para_train | set([(l2, l3) for _, l2, l3 in params.bt_steps])
     params.para_dataset = {
         (src, tgt): {
-            splt: (os.path.join(params.data_path, '%s.%s-%s.%s.pth' % (splt, src, tgt, src)),
-                   os.path.join(params.data_path, '%s.%s-%s.%s.pth' % (splt, src, tgt, tgt)))
+            splt: (os.path.join(params.data_path, '%s-%s.%s.%s.pth' % (src, tgt, src, splt)),
+                   os.path.join(params.data_path, '%s-%s.%s.%s.pth' % (src, tgt, tgt, splt)))
             for splt in ['train', 'valid', 'test']
             if splt != 'train' or (src, tgt) in required_para_train or (tgt, src) in required_para_train
         } for src in params.langs for tgt in params.langs

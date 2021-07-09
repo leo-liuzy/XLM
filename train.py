@@ -46,21 +46,26 @@ def get_parser():
                         help="Only use an encoder")
 
     # model parameters
-    parser.add_argument("--emb_dim", type=int, default=512,
+    # Leo: I modified the default setting to fit huggingface default
+    parser.add_argument("--emb_dim", type=int, default=768,
                         help="Embedding layer size")
-    parser.add_argument("--n_layers", type=int, default=4,
+    parser.add_argument("--hidden_dim", type=int, default=3072,
+                        help="Hidden size of MLP in each transformer layer")
+    parser.add_argument("--n_layers", type=int, default=12,
                         help="Number of Transformer layers")
-    parser.add_argument("--n_heads", type=int, default=8,
+    parser.add_argument("--layer_norm_eps", type=int, default=1e-12,
+                        help="Epsilon used by transformer layernorm")
+    parser.add_argument("--n_heads", type=int, default=12,
                         help="Number of Transformer heads")
-    parser.add_argument("--dropout", type=float, default=0,
+    parser.add_argument("--dropout", type=float, default=0.1,
                         help="Dropout")
-    parser.add_argument("--attention_dropout", type=float, default=0,
+    parser.add_argument("--attention_dropout", type=float, default=0.1,
                         help="Dropout in the attention layer")
-    parser.add_argument("--gelu_activation", type=bool_flag, default=False,
+    parser.add_argument("--gelu_activation", type=bool_flag, default=True,
                         help="Use a GELU activation instead of ReLU")
     parser.add_argument("--share_inout_emb", type=bool_flag, default=True,
                         help="Share input and output embeddings")
-    parser.add_argument("--sinusoidal_embeddings", type=bool_flag, default=False,
+    parser.add_argument("--sinusoidal_embeddings", type=bool_flag, default=True,
                         help="Use sinusoidal embeddings")
     parser.add_argument("--use_lang_emb", type=bool_flag, default=True,
                         help="Use language embedding")
@@ -118,7 +123,7 @@ def get_parser():
 
     # batch parameters
     parser.add_argument("--bptt", type=int, default=256,
-                        help="Sequence length")
+                        help="Sequence length (not including BOS)") # Leo's comment: for some reason, the batched sentences does't use BOS
     parser.add_argument("--max_len", type=int, default=100,
                         help="Maximum length of sentences (after BPE)")
     parser.add_argument("--group_by_size", type=bool_flag, default=True,
@@ -151,6 +156,10 @@ def get_parser():
     # training coefficients
     parser.add_argument("--lambda_mlm", type=str, default="1",
                         help="Prediction coefficient (MLM)")
+    parser.add_argument("--lambda_simcse", type=str, default="1",
+                        help="Prediction coefficient (SimCSE)")
+    parser.add_argument("--temp_simcse", type=str, default="1",
+                        help="Temperature used in SimCSE")
     parser.add_argument("--lambda_clm", type=str, default="1",
                         help="Causal coefficient (LM)")
     parser.add_argument("--lambda_pc", type=str, default="1",
@@ -167,6 +176,10 @@ def get_parser():
                         help="Causal prediction steps (CLM)")
     parser.add_argument("--mlm_steps", type=str, default="",
                         help="Masked prediction steps (MLM / TLM)")
+    parser.add_argument("--simcse_after_mlm", type=bool, default=True,
+                        help="SimCSE contrastive steps, i.e. monolingual contrastive loss")
+    parser.add_argument("--simcse_steps", type=str, default=parser.parse_known_args()[0].lgs,
+                        help="SimCSE contrastive steps, i.e. monolingual contrastive loss")
     parser.add_argument("--mt_steps", type=str, default="",
                         help="Machine translation steps")
     parser.add_argument("--ae_steps", type=str, default="",
@@ -175,6 +188,14 @@ def get_parser():
                         help="Back-translation steps")
     parser.add_argument("--pc_steps", type=str, default="",
                         help="Parallel classification steps")
+
+    # use pretrained fairseq model
+    # parser.add_argument("--use_hg_model", action="store_true",
+    #                     help="Use pretrained huggingface model")
+    parser.add_argument("--use_hg", action="store_true",
+                        help="Reload pretrained sentencepiece encoder")
+    parser.add_argument("--model_name_or_path", type=str, default="",
+                        help="Reload a pretrained model")
 
     # reload pretrained embeddings / pretrained model / checkpoint
     parser.add_argument("--reload_emb", type=str, default="",
@@ -207,6 +228,8 @@ def get_parser():
                         action="store_true")
 
     # multi-gpu / multi-node
+    parser.add_argument("--use_cpu", action="store_true",
+                        help="Use CPU only")
     parser.add_argument("--local_rank", type=int, default=-1,
                         help="Multi-GPU - Local rank")
     parser.add_argument("--master_port", type=int, default=-1,
@@ -269,7 +292,11 @@ def main(params):
 
             # MLM steps (also includes TLM if lang2 is not None)
             for lang1, lang2 in shuf_order(params.mlm_steps, params):
-                trainer.mlm_step(lang1, lang2, params.lambda_mlm)
+                trainer.mlm_step(lang1, lang2, params.lambda_mlm, params)
+            if params.simcse_after_mlm:
+                # SimCSE steps
+                for lang1, lang2 in shuf_order(params.simcse_steps, params):
+                    trainer.simcse_step(lang1, lang2, params.lambda_simcse)
 
             # parallel classification steps
             for lang1, lang2 in shuf_order(params.pc_steps, params):

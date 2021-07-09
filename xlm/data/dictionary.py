@@ -167,11 +167,11 @@ class Dictionary(object):
         """
         Index sentences with a dictionary.
         """
-        if bin_path is not None and os.path.isfile(bin_path):
-            print("Loading data from %s ..." % bin_path)
-            data = torch.load(bin_path)
-            assert dico == data['dico']
-            return data
+        # if bin_path is not None and os.path.isfile(bin_path):
+        #     print("Loading data from %s ..." % bin_path)
+        #     data = torch.load(bin_path)
+        #     assert dico == data['dico']
+        #     return data
 
         positions = []
         sentences = []

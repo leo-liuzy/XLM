@@ -538,12 +538,16 @@ def convert_to_text(batch, lengths, dico, params):
     sentences = []
 
     for j in range(bs):
-        words = []
-        for k in range(1, lengths[j]):
-            if batch[k, j] == params.eos_index:
-                break
-            words.append(dico[batch[k, j]])
-        sentences.append(" ".join(words))
+        if params.use_hg:
+            sentence = dico.convert_tokens_to_string(dico.convert_ids_to_tokens(batch[:, j]))
+            sentences.append(sentence)
+        else:
+            words = []
+            for k in range(1, lengths[j]):
+                if batch[k, j] == params.eos_index:
+                    break
+                words.append(dico[batch[k, j]])
+            sentences.append(" ".join(words))
     return sentences
 
 

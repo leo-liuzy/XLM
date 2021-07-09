@@ -114,7 +114,15 @@ def init_distributed_mode(params):
         # number of nodes / node ID
         params.n_nodes = params.world_size // params.n_gpu_per_node
         params.node_id = params.global_rank // params.n_gpu_per_node
-
+    elif params.use_cpu:
+        assert params.local_rank == -1
+        assert params.master_port == -1
+        params.n_nodes = 1
+        params.node_id = 0
+        params.local_rank = -1
+        params.global_rank = 0
+        params.world_size = 1
+        params.n_gpu_per_node = 0
     # local job (single GPU)
     else:
         assert params.local_rank == -1
@@ -127,13 +135,14 @@ def init_distributed_mode(params):
         params.n_gpu_per_node = 1
 
     # sanity checks
-    assert params.n_nodes >= 1
-    assert 0 <= params.node_id < params.n_nodes
-    assert 0 <= params.local_rank <= params.global_rank < params.world_size
-    assert params.world_size == params.n_nodes * params.n_gpu_per_node
+    if not params.use_cpu:
+        assert params.n_nodes >= 1
+        assert 0 <= params.node_id < params.n_nodes
+        assert 0 <= params.local_rank <= params.global_rank < params.world_size
+        assert params.world_size == params.n_nodes * params.n_gpu_per_node
 
     # define whether this is the master process / if we are in distributed mode
-    params.is_master = params.node_id == 0 and params.local_rank == 0
+    params.is_master = params.use_cpu or params.node_id == 0 and params.local_rank == 0
     params.multi_node = params.n_nodes > 1
     params.multi_gpu = params.world_size > 1
 

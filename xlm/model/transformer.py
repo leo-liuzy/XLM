@@ -16,7 +16,9 @@ import torch.nn.functional as F
 from .memory import HashingMemory
 
 
-N_MAX_POSITIONS = 512  # maximum input sequence length
+N_MAX_POSITIONS = 514  # maximum input sequence length.
+# Leo's comment: The max len is 512 = 2 (in TLM) * 256; I think the extra two embeddings is to make sure **two** BOS is
+#                inserted at the start of the two sentences.
 
 DECODER_ONLY_PARAMS = [
     'layer_norm15.%i.weight', 'layer_norm15.%i.bias',
@@ -62,8 +64,9 @@ def create_sinusoidal_embeddings(n_pos, dim, out):
         [pos / np.power(10000, 2 * (j // 2) / dim) for j in range(dim)]
         for pos in range(n_pos)
     ])
-    out[:, 0::2] = torch.FloatTensor(np.sin(position_enc[:, 0::2]))
-    out[:, 1::2] = torch.FloatTensor(np.cos(position_enc[:, 1::2]))
+    assert isinstance(out, torch.nn.parameter.Parameter)
+    out.data[:, 0::2] = torch.tensor(np.sin(position_enc[:, 0::2]))
+    out.data[:, 1::2] = torch.tensor(np.cos(position_enc[:, 1::2]))
     out.detach_()
     out.requires_grad = False
 
@@ -265,7 +268,7 @@ class TransformerModel(nn.Module):
 
         # model parameters
         self.dim = params.emb_dim       # 512 by default
-        self.hidden_dim = self.dim * 4  # 2048 by default
+        self.hidden_dim = params.hidden_dim  # 2048 by default
         self.n_heads = params.n_heads   # 8 by default
         self.n_layers = params.n_layers
         self.dropout = params.dropout
@@ -279,7 +282,7 @@ class TransformerModel(nn.Module):
         if params.n_langs > 1 and self.use_lang_emb:
             self.lang_embeddings = Embedding(self.n_langs, self.dim)
         self.embeddings = Embedding(self.n_words, self.dim, padding_idx=self.pad_index)
-        self.layer_norm_emb = nn.LayerNorm(self.dim, eps=1e-12)
+        self.layer_norm_emb = nn.LayerNorm(self.dim, eps=params.layer_norm_eps)
 
         # transformer layers
         self.attentions = nn.ModuleList()
@@ -301,15 +304,15 @@ class TransformerModel(nn.Module):
 
         for layer_id in range(self.n_layers):
             self.attentions.append(MultiHeadAttention(self.n_heads, self.dim, dropout=self.attention_dropout))
-            self.layer_norm1.append(nn.LayerNorm(self.dim, eps=1e-12))
+            self.layer_norm1.append(nn.LayerNorm(self.dim, eps=params.layer_norm_eps))
             if self.is_decoder:
-                self.layer_norm15.append(nn.LayerNorm(self.dim, eps=1e-12))
+                self.layer_norm15.append(nn.LayerNorm(self.dim, eps=params.layer_norm_eps))
                 self.encoder_attn.append(MultiHeadAttention(self.n_heads, self.dim, dropout=self.attention_dropout))
             if ('%i_in' % layer_id) in self.memories:
                 self.ffns.append(None)
             else:
                 self.ffns.append(TransformerFFN(self.dim, self.hidden_dim, self.dim, dropout=self.dropout, gelu_activation=params.gelu_activation))
-            self.layer_norm2.append(nn.LayerNorm(self.dim, eps=1e-12))
+            self.layer_norm2.append(nn.LayerNorm(self.dim, eps=params.layer_norm_eps))
 
         # output layer
         if self.with_output:
@@ -506,6 +509,7 @@ class TransformerModel(nn.Module):
             else:
                 next_words = torch.multinomial(F.softmax(scores / sample_temperature, dim=1), 1).squeeze(1)
             assert next_words.size() == (bs,)
+
 
             # update generations / lengths / finished sentences / current length
             generated[cur_len] = next_words * unfinished_sents + self.pad_index * (1 - unfinished_sents)
