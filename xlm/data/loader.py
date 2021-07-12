@@ -10,10 +10,12 @@ import os
 import numpy as np
 import torch
 import math
+from ipdb import set_trace as bp
 
 from .dataset import StreamDataset, Dataset, ParallelDataset
 from .dictionary import BOS_WORD, EOS_WORD, PAD_WORD, UNK_WORD, MASK_WORD, Dictionary
 from transformers import AutoTokenizer
+import sentencepiece as spm
 
 
 logger = getLogger()
@@ -25,7 +27,7 @@ def process_binarized(data, params):
     """
     dico = data['dico'] if not params.use_hg else data["tokenizer"]
     if isinstance(dico, str):
-        dico = AutoTokenizer.from_pretrained(dico)
+        dico = AutoTokenizer.from_pretrained(dico, use_fast=False)
     assert ((data['sentences'].dtype == np.uint16) and (len(dico) < 1 << 16) or
             (data['sentences'].dtype == np.int32) and (1 << 16 <= len(dico) < 1 << 31))
     logger.info("%i words (%i unique) in %i sentences. %i unknown words (%i unique) covering %.2f%% of the data." % (
@@ -34,7 +36,7 @@ def process_binarized(data, params):
         sum(data['unk_words'].values()), len(data['unk_words']),
         100. * sum(data['unk_words'].values()) / (len(data['sentences']) - len(data['positions']))
     ))
-    if params.max_vocab != -1 and not params.use_hg_model:
+    if params.max_vocab != -1 and not params.use_hg:
         assert params.max_vocab > 0
         logger.info("Selecting %i most frequent words ..." % params.max_vocab)
         dico.max_vocab(params.max_vocab)
@@ -42,7 +44,7 @@ def process_binarized(data, params):
         unk_count = (data['sentences'] == dico.index(UNK_WORD)).sum()
         logger.info("Now %i unknown words covering %.2f%% of the data."
                     % (unk_count, 100. * unk_count / (len(data['sentences']) - len(data['positions']))))
-    if params.min_count > 0 and not params.use_hg_model:
+    if params.min_count > 0 and not params.use_hg:
         logger.info("Selecting words with >= %i occurrences ..." % params.min_count)
         dico.min_count(params.min_count)
         data['sentences'][data['sentences'] >= len(dico)] = dico.index(UNK_WORD)
@@ -94,17 +96,15 @@ def set_dico_parameters(params, data, dico=None):
             # unigram probability to approx the frequency since both has the same order
             # os.path.exists(dico)
             tokenizer_name = dico
-            dico = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=False)
-
+            dico = AutoTokenizer.from_pretrained(tokenizer_name)
+            sp_model = spm.SentencePieceProcessor(model_file=params.path_to_spm)
             assert not hasattr(dico, "counts")
-            assert hasattr(dico, "sp_model")
-            assert hasattr(dico, "fairseq_offset")
 
-            counts = {i + dico.fairseq_offset: math.exp(dico.sp_model.get_score(i)) for i in range(len(dico.sp_model))}
+            counts = {i + params.fairseq_offset: math.exp(sp_model.get_score(i)) for i in range(len(sp_model))}
+            bp()
             for i in dico.all_special_ids:
                 counts[i] = 0
             assert len(counts) == len(dico)
-            dico = AutoTokenizer.from_pretrained(tokenizer_name)
             dico.counts = counts
             data['dico'] = dico
 

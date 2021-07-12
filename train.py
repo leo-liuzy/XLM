@@ -205,6 +205,10 @@ def get_parser():
                         help="Reload pretrained sentencepiece encoder")
     parser.add_argument("--model_name_or_path", type=str, default="",
                         help="Reload a pretrained model")
+    parser.add_argument("--fairseq_offset", type=int, default=1,
+                            help="Offset to align tokens ids in sentencepiece model")
+    parser.add_argument("--path_to_spm", type=str, default="sentencepiece_models/xlm-roberta-base/sentencepiece.bpe.model",
+                        help="path to sentencepiece model")
 
     # reload pretrained embeddings / pretrained model / checkpoint
     parser.add_argument("--reload_emb", type=str, default="",
