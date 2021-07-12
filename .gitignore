@@ -129,6 +129,6 @@ dmypy.json
 /dumped
 .idea/*
 data/BPE_XLM_en_zh-Hans_ar_debug/*
-data/XLM_en_zh-Hans_ar_debug/*
+# data/XLM_en_zh-Hans_ar_debug/*
 pretrained_models/*
 tools/*

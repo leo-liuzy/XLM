@@ -222,6 +222,66 @@ class MultiHeadAttention(nn.Module):
         return self.out_lin(context)
 
 
+class Pooler(nn.Module):
+    """
+    Parameter-free poolers to get the sentence embedding
+    'cls': [CLS] representation with BERT/RoBERTa's MLP pooler.
+    'cls_before_pooler': [CLS] representation without the original MLP pooler.
+    'avg': average of the last layers' hidden states at each token.
+    'avg_top2': average of the last two layers.
+    'avg_first_last': average of the first and the last layers.
+    """
+    def __init__(self, params):
+        super().__init__()
+        self.pooler_type = params.pooler_type
+        assert self.pooler_type in ["cls", "cls_before_pooler", "cls_after_pooler",
+                                    "avg", "avg_top2", "avg_first_last"], "unrecognized pooling type %s" % self.pooler_type
+        if self.pooler_type in ["cls_after_pooler"]:
+            self.dense = nn.Linear(params.emb_dim, params.emb_dim)
+            self.activation = nn.Tanh()
+
+    def forward(self, attention_mask, last_hidden):
+        # pooler_output = outputs.pooler_output
+        # hidden_states = outputs.hidden_states
+
+        if self.pooler_type in ['cls_before_pooler', 'cls']:
+            return last_hidden[0]
+        elif self.pooler_type in ['cls_after_pooler']:
+            first_token_tensor = last_hidden[0]
+            pooled_output = self.dense(first_token_tensor)
+            pooled_output = self.activation(pooled_output)
+            return pooled_output
+        elif self.pooler_type == "avg":
+            return ((last_hidden * attention_mask.unsqueeze(-1)).sum(1) / attention_mask.sum(-1).unsqueeze(-1))
+        elif self.pooler_type == "avg_first_last":
+            raise NotImplementedError
+            # first_hidden = hidden_states[0]
+            # last_hidden = hidden_states[-1]
+            # pooled_result = ((first_hidden + last_hidden) / 2.0 * attention_mask.unsqueeze(-1)).sum(1) / attention_mask.sum(-1).unsqueeze(-1)
+            # return pooled_result
+        elif self.pooler_type == "avg_top2":
+            raise NotImplementedError
+            # second_last_hidden = hidden_states[-2]
+            # last_hidden = hidden_states[-1]
+            # pooled_result = ((last_hidden + second_last_hidden) / 2.0 * attention_mask.unsqueeze(-1)).sum(1) / attention_mask.sum(-1).unsqueeze(-1)
+            # return pooled_result
+        else:
+            raise NotImplementedError
+
+
+class Similarity(nn.Module):
+    """
+    Dot product or cosine similarity
+    """
+
+    def __init__(self, params):
+        super().__init__()
+        self.temp = params.temp_simcse
+        self.cos = nn.CosineSimilarity(dim=-1)
+
+    def forward(self, x, y):
+        return self.cos(x, y) / self.temp
+
 class TransformerFFN(nn.Module):
 
     def __init__(self, in_dim, dim_hidden, out_dim, dropout, gelu_activation):
@@ -320,6 +380,9 @@ class TransformerModel(nn.Module):
             if params.share_inout_emb:
                 self.pred_layer.proj.weight = self.embeddings.weight
 
+        self.pooler = Pooler(params)
+        self.similarity_metric = Similarity(params)
+
     def forward(self, mode, **kwargs):
         """
         Forward function with different forward modes.
@@ -332,7 +395,8 @@ class TransformerModel(nn.Module):
         else:
             raise Exception("Unknown mode: %s" % mode)
 
-    def fwd(self, x, lengths, causal, src_enc=None, src_len=None, positions=None, langs=None, cache=None):
+    def fwd(self, x, lengths, causal, src_enc=None, src_len=None,
+            positions=None, langs=None, cache=None, return_attn_mask=False):
         """
         Inputs:
             `x` LongTensor(slen, bs), containing word indices
@@ -427,7 +491,8 @@ class TransformerModel(nn.Module):
 
         # move back sequence length to dimension 0
         tensor = tensor.transpose(0, 1)
-
+        if return_attn_mask:
+            return tensor, attn_mask
         return tensor
 
     def predict(self, tensor, pred_mask, y, get_scores):

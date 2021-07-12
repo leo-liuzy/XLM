@@ -8,6 +8,9 @@
 import json
 import random
 import argparse
+import torch
+import numpy as np
+
 
 from xlm.slurm import init_signal_handler, init_distributed_mode
 from xlm.data.loader import check_data_params, load_data
@@ -69,6 +72,8 @@ def get_parser():
                         help="Use sinusoidal embeddings")
     parser.add_argument("--use_lang_emb", type=bool_flag, default=True,
                         help="Use language embedding")
+    parser.add_argument("--pooler_type", type=str, default="cls",
+                        help="The pooler to get sentence representation, if we use SimCSE")
 
     # memory parameters
     parser.add_argument("--use_memory", type=bool_flag, default=False,
@@ -152,13 +157,17 @@ def get_parser():
                         help="Validation metrics")
     parser.add_argument("--accumulate_gradients", type=int, default=1,
                         help="Accumulate model gradients over N iterations (N times larger batch sizes)")
+    parser.add_argument("--seed", type=int, default=0,
+                        help='Random seed for: random, np.random, torch')
 
     # training coefficients
     parser.add_argument("--lambda_mlm", type=str, default="1",
                         help="Prediction coefficient (MLM)")
+    parser.add_argument("--use_bos", type=bool_flag, default=False,
+                        help="Use the BOS token. It seems they use EOS in place of BOS")  # Leo added
     parser.add_argument("--lambda_simcse", type=str, default="1",
                         help="Prediction coefficient (SimCSE)")
-    parser.add_argument("--temp_simcse", type=str, default="1",
+    parser.add_argument("--temp_simcse", type=float, default=0.05,
                         help="Temperature used in SimCSE")
     parser.add_argument("--lambda_clm", type=str, default="1",
                         help="Causal coefficient (LM)")
@@ -176,7 +185,7 @@ def get_parser():
                         help="Causal prediction steps (CLM)")
     parser.add_argument("--mlm_steps", type=str, default="",
                         help="Masked prediction steps (MLM / TLM)")
-    parser.add_argument("--simcse_after_mlm", type=bool, default=True,
+    parser.add_argument("--simcse_after_mlm", type=bool_flag, default=False,
                         help="SimCSE contrastive steps, i.e. monolingual contrastive loss")
     parser.add_argument("--simcse_steps", type=str, default=parser.parse_known_args()[0].lgs,
                         help="SimCSE contrastive steps, i.e. monolingual contrastive loss")
@@ -349,6 +358,11 @@ if __name__ == '__main__':
     # check parameters
     check_data_params(params)
     check_model_params(params)
+
+    # set seed
+    torch.manual_seed(0)
+    random.seed(0)
+    np.random.seed(0)
 
     # run experiment
     main(params)

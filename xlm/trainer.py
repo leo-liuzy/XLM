@@ -716,27 +716,44 @@ class Trainer(object):
         x, lengths, positions, langs, _ = self.generate_batch(lang1, lang2, 'pred')
         x, lengths, positions, langs, _ = self.round_batch(x, lengths, positions, langs)
         x, y, pred_mask = self.mask_out(x, lengths)
-
         # Leo's comment: the loader doesn't have BOS at the start for some reason, so we are
         #                manually inserting it.
         assert tuple(x.shape) == (params.bptt, params.batch_size)
-        # Note: one might need to adjust N_MAX_POSITIONS in model/transformer.py
-        
-        y += 1
+        # Note: one might need to adjust N_MAX_POSITIONS in model/transformer.py to make sure added BOS won't affect training
+        if params.use_bos:
+            x[0, :] = params.bos_index
         # cuda
         if not params.use_cpu:
             x, y, pred_mask, lengths, positions, langs = to_cuda(x, y, pred_mask, lengths, positions, langs)
 
         # forward / loss
         # assert len(x.size()) == 2
-        tensor = model('fwd', x=x, lengths=lengths, positions=positions, langs=langs, causal=False)
-        if not params.simcse_after_mlm:
-            # SimCSE needs a second forward pass
-            tensor_from_diff_mask = model('fwd', x=x, lengths=lengths, positions=positions, langs=langs, causal=False)
+        tensor, attn_mask = model('fwd', x=x, lengths=lengths, positions=positions, langs=langs, causal=False,
+                                  return_attn_mask=True)
+        _, mlm_loss = model('predict', tensor=tensor, pred_mask=pred_mask, y=y, get_scores=False)
 
-        _, loss = model('predict', tensor=tensor, pred_mask=pred_mask, y=y, get_scores=False)
-        self.stats[('MLM-%s' % lang1) if lang2 is None else ('MLM-%s-%s' % (lang1, lang2))].append(loss.item())
-        loss = lambda_coeff * loss
+        self.stats[('MLM-%s' % lang1) if lang2 is None else ('MLM-%s-%s' % (lang1, lang2))].append(mlm_loss.item())
+        loss = lambda_coeff * mlm_loss
+        h_z = model.pooler(attn_mask, tensor)
+        if not params.simcse_after_mlm and lang2 is None:
+            # SimCSE needs a second forward pass
+            tensor_from_diff_mask = model('fwd', x=x, lengths=lengths, positions=positions, langs=langs, causal=False,)
+            h_z_prime = model.pooler(attn_mask, tensor_from_diff_mask)
+            # cos_sims = []
+            #
+            # for i in range(len(h_z)):
+            #     cos_sims.append(F.cosine_similarity(h_z[i].unsqueeze(0), h_z_prime))
+
+            cos_sim = model.similarity_metric(h_z.unsqueeze(1), h_z_prime.unsqueeze(0))
+
+            labels = torch.arange(cos_sim.size(0)).long().to(model.embeddings.weight.device)
+            loss_fct = nn.CrossEntropyLoss()
+            simcse_loss = params.lambda_simcse * loss_fct(cos_sim, labels)
+            assert lang2 is None
+            self.stats[('SimCSE-%s' % lang1)].append(simcse_loss.item())
+            # [('SimCSE-%s' % l, []) for l in params.langs] +
+            loss += simcse_loss
+
 
         # optimize
         self.optimize(loss)
@@ -761,7 +778,7 @@ class Trainer(object):
         model.train()
 
         # generate batch / select words to predict
-        x, lengths, positions, langs, _ = self.generate_batch(lang1, lang2, 'pred')
+        x, lengths, positions, langs, _ = self.generate_batch(lang1, lang2, 'simcse')
         x, lengths, positions, langs, _ = self.round_batch(x, lengths, positions, langs)
         x, y, pred_mask = self.mask_out(x, lengths)
 
@@ -770,11 +787,22 @@ class Trainer(object):
             x, y, pred_mask, lengths, positions, langs = to_cuda(x, y, pred_mask, lengths, positions, langs)
 
         # forward / loss
-        tensor = model('fwd', x=x, lengths=lengths, positions=positions, langs=langs, causal=False)
+        tensor, attn_mask = model('fwd', x=x, lengths=lengths, positions=positions, langs=langs, causal=False,
+                                  return_attn_mask=True)
+        h_z = model.pooler(attn_mask, tensor)
 
-        _, loss = model('predict', tensor=tensor, pred_mask=pred_mask, y=y, get_scores=False)
-        self.stats[('MLM-%s' % lang1) if lang2 is None else ('MLM-%s-%s' % (lang1, lang2))].append(loss.item())
-        loss = lambda_coeff * loss
+        # SimCSE needs a second forward pass
+        tensor_from_diff_mask = model('fwd', x=x, lengths=lengths, positions=positions, langs=langs, causal=False, )
+        h_z_prime = model.pooler(attn_mask, tensor_from_diff_mask)
+
+        cos_sim = model.similarity_metric(h_z.unsqueeze(1), h_z_prime.unsqueeze(0))
+        labels = torch.arange(cos_sim.size(0)).long().to(model.embeddings.weight.device)
+        loss_fct = nn.CrossEntropyLoss()
+        loss = lambda_coeff * loss_fct(cos_sim, labels)
+
+        assert lang2 is None
+        self.stats[('SimCSE-%s' % lang1)].append(loss.item())
+        # [('SimCSE-%s' % l, []) for l in params.langs] +
 
         # optimize
         self.optimize(loss)

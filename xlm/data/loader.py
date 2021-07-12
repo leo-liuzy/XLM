@@ -278,13 +278,13 @@ def check_data_params(params):
     assert len(params.clm_steps) == len(set(params.clm_steps))
 
     # MLM / TLM steps
-    mlm_steps = [s.split('-') if s not in ["zh-Hans, zh-Hant"] else [s] for s in params.mlm_steps.split(',') if len(s) > 0]
+    mlm_steps = [s.split('-') if s not in ["zh-Hans", "zh-Hant"] else [s] for s in params.mlm_steps.split(',') if len(s) > 0]
     params.mlm_steps = [(s[0], None) if len(s) == 1 else tuple(s) for s in mlm_steps]
     assert all([(l1 in params.langs) and (l2 in params.langs or l2 is None) for l1, l2 in params.mlm_steps])
     assert len(params.mlm_steps) == len(set(params.mlm_steps))
 
     # MLM / TLM steps
-    simcse_steps = [s.split('-') if s not in ["zh-Hans, zh-Hant"] else [s] for s in params.simcse_steps.split(',') if len(s) > 0]
+    simcse_steps = [s.split('-') if s not in ["zh-Hans", "zh-Hant"] else [s] for s in params.simcse_steps.split(',') if len(s) > 0]
     params.simcse_steps = [(s[0], None) if len(s) == 1 else tuple(s) for s in simcse_steps]
     assert all([(l1 in params.langs) and (l2 is None) for l1, l2 in params.simcse_steps])
     assert len(params.simcse_steps) == len(set(params.simcse_steps))
