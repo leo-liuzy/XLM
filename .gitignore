@@ -125,10 +125,13 @@ dmypy.json
 
 # tools, data, and dumped models
 # /tools
-/data
+# /data
 /dumped
 .idea/*
 data/BPE_XLM_en_zh-Hans_ar_debug/*
+data/mono/*
+data/para/*
+data/sample_dataset/*
 !data/XLM_en_zh-Hans_ar_debug/*
 pretrained_models/*
 tools/*
