@@ -101,7 +101,6 @@ def set_dico_parameters(params, data, dico=None):
             assert not hasattr(dico, "counts")
 
             counts = {i + params.fairseq_offset: math.exp(sp_model.get_score(i)) for i in range(len(sp_model))}
-            bp()
             for i in dico.all_special_ids:
                 counts[i] = 0
             assert len(counts) == len(dico)
