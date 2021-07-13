@@ -15,7 +15,7 @@ pair=$1  # input language pair
 
 # data paths
 MAIN_PATH=$PWD
-PARA_PATH=$PWD/data/para
+PARA_PATH=$PWD/data/para_untokenized
 
 # tools paths
 TOOLS_PATH=$PWD/tools
@@ -184,7 +184,8 @@ fi
 # tokenize
 for lg in $(echo $pair | sed -e 's/\-/ /g'); do
   if [ ! -f $PARA_PATH/$pair.$lg.all ]; then
-    cat $PARA_PATH/*.$pair.$lg | $TOKENIZE $lg | python $LOWER_REMOVE_ACCENT > $PARA_PATH/$pair.$lg.all
+    # cat $PARA_PATH/*.$pair.$lg | $TOKENIZE $lg | python $LOWER_REMOVE_ACCENT > $PARA_PATH/$pair.$lg.all
+    cat $PARA_PATH/*.$pair.$lg | python $LOWER_REMOVE_ACCENT > $PARA_PATH/$pair.$lg.all
   fi
 done
 

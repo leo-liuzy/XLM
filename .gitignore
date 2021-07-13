@@ -131,6 +131,7 @@ dmypy.json
 data/BPE_XLM_en_zh-Hans_ar_debug/*
 data/mono/*
 data/para/*
+data/para_untokenized/*
 data/sample_dataset/*
 !data/XLM_en_zh-Hans_ar_debug/*
 pretrained_models/*
