@@ -749,7 +749,6 @@ class Trainer(object):
 
             labels = torch.arange(cos_sim.size(0)).long().to(model.embeddings.weight.device)
             loss_fct = nn.CrossEntropyLoss()
-            bp()
             simcse_loss = params.lambda_simcse * loss_fct(cos_sim, labels)
             assert lang2 is None
             self.stats[('SimCSE-%s' % lang1)].append(simcse_loss.item())
@@ -759,6 +758,7 @@ class Trainer(object):
 
         # optimize
         self.optimize(loss)
+        # bp()
 
         # number of processed sentences / words
         self.n_sentences += params.batch_size

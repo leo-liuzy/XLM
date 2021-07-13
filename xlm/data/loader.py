@@ -103,11 +103,16 @@ def set_dico_parameters(params, data, dico=None):
             sp_model = spm.SentencePieceProcessor(model_file=params.path_to_spm)
             assert not hasattr(dico, "counts")
 
+            # this is needed in saving checkpoints and sampling tokens to be masked
             counts = {i + params.fairseq_offset: math.exp(sp_model.get_score(i)) for i in range(len(sp_model))}
             for i in dico.all_special_ids:
                 counts[i] = 0
             assert len(counts) == len(dico)
             dico.counts = counts
+            # this is needed in saving checkpoints.
+            # bp()
+            dico.id2word = {i: dico.convert_ids_to_tokens(i) for i in range(len(dico))}
+            dico.word2id = {v: k for k, v in dico.id2word.items()}
             data['dico'] = dico
 
     n_words = len(dico)

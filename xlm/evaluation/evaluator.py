@@ -11,6 +11,7 @@ import subprocess
 from collections import OrderedDict
 import numpy as np
 import torch
+from ipdb import set_trace as bp
 
 from ..utils import to_cuda, restore_segmentation, concat_batches
 from ..model.memory import HashingMemory
@@ -207,7 +208,8 @@ class Evaluator(object):
 
         # generate possible targets / update x input
         _x_real = x[pred_mask]
-        _x_mask = _x_real.clone().fill_(params.mask_index)
+        _x_mask = _x_real.clone().fill_(params.mask_index).bool()
+        bp()
         x = x.masked_scatter(pred_mask, _x_mask)
 
         assert 0 <= x.min() <= x.max() < params.n_words
