@@ -15,6 +15,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils import clip_grad_norm_
+from ipdb import set_trace as bp
 # import apex
 
 from .optim import get_optimizer
@@ -748,6 +749,7 @@ class Trainer(object):
 
             labels = torch.arange(cos_sim.size(0)).long().to(model.embeddings.weight.device)
             loss_fct = nn.CrossEntropyLoss()
+            bp()
             simcse_loss = params.lambda_simcse * loss_fct(cos_sim, labels)
             assert lang2 is None
             self.stats[('SimCSE-%s' % lang1)].append(simcse_loss.item())

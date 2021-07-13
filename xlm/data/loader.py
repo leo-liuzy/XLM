@@ -25,7 +25,10 @@ def process_binarized(data, params):
     """
     Process a binarized dataset and log main statistics.
     """
-    dico = data['dico'] if not params.use_hg else data["tokenizer"]
+    if os.path.exists(params.model_name_or_path):
+        dico = params.model_name_or_path
+    else:
+        dico = data['dico'] if not params.use_hg else data["tokenizer"]
     if isinstance(dico, str):
         dico = AutoTokenizer.from_pretrained(dico, use_fast=False)
     assert ((data['sentences'].dtype == np.uint16) and (len(dico) < 1 << 16) or
@@ -152,7 +155,10 @@ def load_mono_data(params, data):
 
             # load data / update dictionary parameters / update data
             mono_data = load_binarized(params.mono_dataset[lang][splt], params)
-            set_dico_parameters(params, data, mono_data['dico'] if not params.use_hg else mono_data['tokenizer'])
+            if os.path.exists(params.model_name_or_path):
+                set_dico_parameters(params, data, params.model_name_or_path)
+            else:
+                set_dico_parameters(params, data, mono_data['dico'] if not params.use_hg else mono_data['tokenizer'])
 
             # create stream dataset
             bs = params.batch_size if splt == 'train' else 1
