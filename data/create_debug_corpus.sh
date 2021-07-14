@@ -2,6 +2,8 @@ source_dir="XLM_pilot_run_21Langs"
 # debug_dir="XLM_pilot_run_21Langs_debug"
 debug_dir="${source_dir}_debug"
 
+mkdir -p ${debug_dir}
+
 cp ${source_dir}/*.test ${debug_dir}/
 cp ${source_dir}/*.valid ${debug_dir}/
 

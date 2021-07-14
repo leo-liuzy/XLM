@@ -134,5 +134,7 @@ data/para/*
 data/para_untokenized/*
 data/sample_dataset/*
 !data/XLM_en_zh-Hans_ar_debug/*
+data/XLM_pilot_run_21Langs/*
+data/XLM_pilot_run_21Langs_debug/*
 pretrained_models/*
 tools/*

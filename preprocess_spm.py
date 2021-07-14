@@ -23,6 +23,8 @@ from xlm.logger import create_logger
 from xlm.data.dictionary import Dictionary
 import sentencepiece as spm
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
+from ipdb import set_trace as bp
+from tqdm import tqdm
 
 
 def index_data(path, bin_path, tokenizer: PreTrainedTokenizerBase):
@@ -41,14 +43,14 @@ def index_data(path, bin_path, tokenizer: PreTrainedTokenizerBase):
 
     # index sentences
     f = open(path, 'r', encoding='utf-8')
-    for i, line in enumerate(f):
+    for i, line in tqdm(enumerate(f)):
         if i % 1000000 == 0 and i > 0:
             print(i)
         indexed_s = tokenizer.encode(line.rstrip())[1:-1]  # tokenizer automatically add BOS & EOS
         # s = line.rstrip().split()
         # skip empty sentences
-        if len(indexed_s) == 0:
-            print("Empty sentence in line %i." % i)
+        # if len(indexed_s) == 0:
+        #     print("Empty sentence in line %i." % i)
 
         # index sentence words
         count_unk = 0
@@ -56,8 +58,8 @@ def index_data(path, bin_path, tokenizer: PreTrainedTokenizerBase):
         for word_id in indexed_s:
             # if we find a special word which is not an unknown word, skip the sentence
             if word_id in tokenizer.all_special_ids:
-                logger.warning('Found unexpected special word "%s" (%i)!!' % (tokenizer.convert_ids_to_tokens(word_id),
-                                                                              word_id))
+                # logger.warning('Found unexpected special word "%s" (%i)!!' % (tokenizer.convert_ids_to_tokens(word_id),
+                #                                                               word_id))
                 continue
             assert word_id >= 0
             indexed.append(word_id)
@@ -103,6 +105,7 @@ if __name__ == '__main__':
     assert os.path.isfile(txt_path)
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
+    # bp()
     logger.info("")
 
     data = index_data(txt_path, bin_path, tokenizer)
