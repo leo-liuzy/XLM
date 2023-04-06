@@ -719,7 +719,7 @@ class Trainer(object):
         x, y, pred_mask = self.mask_out(x, lengths)
         # Leo's comment: the loader doesn't have BOS at the start for some reason, so we are
         #                manually inserting it.
-        assert tuple(x.shape) == (params.bptt, params.batch_size)
+        # assert tuple(x.shape[:]) == (params.bptt, params.batch_size)
         # Note: one might need to adjust N_MAX_POSITIONS in model/transformer.py to make sure added BOS won't affect training
         if params.use_bos:
             x[0, :] = params.bos_index

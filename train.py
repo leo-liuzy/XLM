@@ -305,6 +305,8 @@ def main(params):
 
             # MLM steps (also includes TLM if lang2 is not None)
             for lang1, lang2 in shuf_order(params.mlm_steps, params):
+                if lang2 is None:
+                    continue
                 trainer.mlm_step(lang1, lang2, params.lambda_mlm, params)
             if params.simcse_after_mlm:
                 # SimCSE steps

@@ -4,7 +4,7 @@
 set -e
 
 SPM_PATH="pretrained_models/xlm-roberta-base"
-source_dir="data/XLM_pilot_run_21Langs"
+source_dir="data/XLM_en_zh-Hans_ar_debug"
 
 mkdir -p $source_dir
 

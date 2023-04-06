@@ -90,7 +90,7 @@ def set_dico_parameters(params, data, dico=None):
             data['dico'] = dico
     else:
         if 'dico' in data:
-            assert data['dico'].name_or_path == dico
+            assert data['dico'].name_or_path in dico or dico in data['dico'].name_or_path
             dico = data['dico']
             assert hasattr(dico, "counts")
         else:

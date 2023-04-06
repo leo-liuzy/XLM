@@ -203,5 +203,5 @@ split_data() {
 }
 for lg in $(echo $pair | sed -e 's/\-/ /g'); do
   split_data $PARA_PATH/$pair.$lg.all $PARA_PATH/$pair.$lg.train $PARA_PATH/$pair.$lg.valid $PARA_PATH/$pair.$lg.test
-done
+done:q
 
