@@ -138,3 +138,4 @@ data/XLM_pilot_run_21Langs/*
 data/XLM_pilot_run_21Langs_debug/*
 pretrained_models/*
 tools/*
+**/.DS_Store
